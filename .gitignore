@@ -1,0 +1,21 @@
+# Python
+backend/.venv/
+backend/.env
+backend/storage/imports/*.xlsx
+backend/app/storage/imports/*.xlsx
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
