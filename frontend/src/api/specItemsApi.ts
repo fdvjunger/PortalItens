@@ -251,7 +251,6 @@ export interface PreviewResult {
   warnings?: PreviewWarning[];
   sample_diffs: PreviewDiff[];
   errors: PreviewError[];
-  warnings: PreviewWarning[];
 }
 
 export interface ApplyResult {
