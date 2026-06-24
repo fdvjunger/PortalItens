@@ -13,6 +13,8 @@ import {
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { SpecItem } from '../api/specItemsApi';
 
+import EmptyState from './common/EmptyState';
+
 interface DataTableProps {
   columns: string[];
   rows: SpecItem[];
@@ -46,6 +48,10 @@ export default function DataTable({
   onSortChange,
   onView,
 }: DataTableProps) {
+  if (!rows.length) {
+    return <EmptyState title="Nenhum registro encontrado" description="Ajuste os filtros ou refine a busca." />;
+  }
+
   return (
     <Paper elevation={1}>
       <TableContainer sx={{ maxHeight: '70vh' }}>

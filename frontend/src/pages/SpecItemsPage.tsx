@@ -14,7 +14,8 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DescriptionIcon from '@mui/icons-material/Description';
 import ColumnSelector from '../components/ColumnSelector';
 import DataTable from '../components/DataTable';
-import FilterBar, { FilterValues } from '../components/FilterBar';
+import FilterBar from '../components/FilterBar';
+import { emptySpecItemsFilters, SpecItemsFilterValues } from '../types/filters';
 import {
   ColumnMetadata,
   SpecItem,
@@ -39,23 +40,13 @@ const DEFAULT_VISIBLE_COLUMNS = [
   'alterDataID',
 ];
 
-const initialFilters: FilterValues = {
-  global_search: '',
-  cliente: '',
-  item_type: '',
-  short_code: '',
-  schedule: '',
-  material_description: '',
-  mds: '',
-  spec_id: '',
-  has_nace: '',
-};
+const initialFilters: SpecItemsFilterValues = { ...emptySpecItemsFilters };
 
 export default function SpecItemsPage() {
   const navigate = useNavigate();
   const [columns, setColumns] = useState<ColumnMetadata[]>([]);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_VISIBLE_COLUMNS);
-  const [filters, setFilters] = useState<FilterValues>(initialFilters);
+  const [filters, setFilters] = useState<SpecItemsFilterValues>(initialFilters);
   const [rows, setRows] = useState<SpecItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -102,6 +93,11 @@ export default function SpecItemsPage() {
         mds: filters.mds || undefined,
         spec_id: filters.spec_id || undefined,
         has_nace: filters.has_nace || undefined,
+        rating: filters.rating || undefined,
+        has_weight: filters.has_weight || undefined,
+        has_alterdata: filters.has_alterdata || undefined,
+        has_paint_area: filters.has_paint_area || undefined,
+        has_material: filters.has_material || undefined,
       });
       setRows(response.items);
       setTotal(response.total);
@@ -116,7 +112,7 @@ export default function SpecItemsPage() {
     loadData();
   }, [loadData]);
 
-  const handleFilterChange = (field: keyof FilterValues, value: string) => {
+  const handleFilterChange = (field: keyof SpecItemsFilterValues, value: string) => {
     setFilters((prev) => ({ ...prev, [field]: value }));
     setPage(0);
   };
@@ -132,7 +128,7 @@ export default function SpecItemsPage() {
 
   const buildActiveFilters = () => {
     const active: Record<string, string> = {};
-    (Object.keys(filters) as Array<keyof FilterValues>).forEach((key) => {
+    (Object.keys(filters) as Array<keyof SpecItemsFilterValues>).forEach((key) => {
       if (key !== 'global_search' && filters[key]) {
         active[key] = filters[key];
       }
@@ -190,7 +186,14 @@ export default function SpecItemsPage() {
   return (
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-        <Typography variant="h4">Itens</Typography>
+        <Box>
+          <Typography variant="h4" gutterBottom sx={{ mb: 0.5 }}>
+            Itens / Ocorrências
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Listagem detalhada de ocorrências em spec, com exportação e importação.
+          </Typography>
+        </Box>
         <Stack direction="row" spacing={1}>
           <Button
             variant="outlined"

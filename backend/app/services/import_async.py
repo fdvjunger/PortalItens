@@ -930,6 +930,9 @@ def run_apply_job(run_id: int, mode: str = "valid_rows_only") -> None:
         inserted = 0
         updated = 0
         unchanged = 0
+        catalog_items_created = 0
+        spec_links_created = 0
+        spec_links_updated = 0
         skipped_error_rows = 0
 
         staging.update_import_progress(
@@ -1040,14 +1043,29 @@ def run_apply_job(run_id: int, mode: str = "valid_rows_only") -> None:
                             insert_data["created_at"] = now
                         if "updated_at" not in insert_data:
                             insert_data["updated_at"] = now
-                        spec_items_service.upsert_spec_item(db, int(target_id), insert_data, is_update=False)
+                        upsert_result = spec_items_service.upsert_spec_item(
+                            db, int(target_id), insert_data, is_update=False
+                        )
+                        if upsert_result:
+                            if upsert_result.get("catalog_item_created"):
+                                catalog_items_created += 1
+                            if upsert_result.get("spec_link_created"):
+                                spec_links_created += 1
                         staging.record_apply_log(db, import_run_id=run_id, action_type="INSERT", target_id=int(target_id))
                         inserted += 1
                     elif row["row_status"] == "UPDATE" and target_id is not None:
                         update_data = {k: v for k, v in mapped.items() if k not in ("id", "created_at", "updated_at")}
                         update_data["updated_at"] = now
                         existing = spec_items_service.get_spec_item_by_id(db, int(target_id)) or {}
-                        spec_items_service.upsert_spec_item(db, int(target_id), update_data, is_update=True)
+                        merged_payload = {**existing, **update_data}
+                        upsert_result = spec_items_service.upsert_spec_item(
+                            db, int(target_id), merged_payload, is_update=True
+                        )
+                        if upsert_result:
+                            if upsert_result.get("catalog_item_created"):
+                                catalog_items_created += 1
+                            if upsert_result.get("spec_link_updated"):
+                                spec_links_updated += 1
                         for col, new_val in update_data.items():
                             old_str = serialize_for_compare(existing.get(col))
                             new_str = serialize_for_compare(new_val)
@@ -1104,7 +1122,10 @@ def run_apply_job(run_id: int, mode: str = "valid_rows_only") -> None:
             total=total,
             message=(
                 f"Importação aplicada. {applied_rows} linha(s) processada(s), "
-                f"{skipped_error_rows} ignorada(s) por erro."
+                f"{skipped_error_rows} ignorada(s) por erro. "
+                f"Canônicos criados: {catalog_items_created}, "
+                f"vínculos criados: {spec_links_created}, "
+                f"vínculos atualizados: {spec_links_updated}."
             ),
         )
         db.commit()
@@ -1119,6 +1140,9 @@ def run_apply_job(run_id: int, mode: str = "valid_rows_only") -> None:
             inserted_rows=inserted,
             updated_rows=updated,
             unchanged_rows=unchanged,
+            catalog_items_created=catalog_items_created,
+            spec_links_created=spec_links_created,
+            spec_links_updated=spec_links_updated,
             duration_ms=duration_ms,
         )
     except Exception as exc:

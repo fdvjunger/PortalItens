@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     app_env: str = "local"
     cors_origins: str = "http://localhost:5173"
     log_level: str = "INFO"
+    db_dialect: str | None = None
+    db_schema: str | None = None
+    spec_items_read_source: str | None = None
+    use_catalog_writes: bool = True
 
     @property
     def cors_origins_list(self) -> list[str]:

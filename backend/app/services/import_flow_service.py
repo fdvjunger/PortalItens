@@ -23,8 +23,9 @@ from app.utils.excel_utils import (
     utc_now,
 )
 from app.utils.value_parser import DATETIME_COLUMNS, NUMERIC_COLUMNS, try_parse_datetime_for_import
-from app.services.import_rules import critical_row_error_message, is_critical_row_error
+from app.core.db_schema import read_source_sql
 from app.services.import_guard import validate_preview_ready_for_apply
+from app.services.import_rules import critical_row_error_message, is_critical_row_error
 from app.utils.db_coercion import NPS_ROW_CONTEXT_COLUMNS, PIPE_ROW_PEER_COLUMNS, build_coercion_warning_message
 
 
@@ -772,7 +773,7 @@ def _generate_preview(
         offset += batch_size
 
     existing_ids = spec_items_service.get_existing_ids(db, excel_ids)
-    max_id = db.execute(text("SELECT COALESCE(MAX(id), 0) FROM spec_items")).scalar()
+    max_id = db.execute(text(f"SELECT COALESCE(MAX(id), 0) FROM {read_source_sql()}")).scalar()
     next_auto_id = int(max_id) + 1
 
     for parsed in parsed_meta:
@@ -1110,7 +1111,9 @@ def apply_import(db: Session, run_id: int) -> dict[str, Any]:
                     insert_data["created_at"] = now
                 if "updated_at" not in insert_data:
                     insert_data["updated_at"] = now
-                spec_items_service.upsert_spec_item(db, int(target_id), insert_data, is_update=False)
+                upsert_result = spec_items_service.upsert_spec_item(
+                    db, int(target_id), insert_data, is_update=False
+                )
                 staging.record_apply_log(
                     db,
                     import_run_id=run_id,
@@ -1126,7 +1129,10 @@ def apply_import(db: Session, run_id: int) -> dict[str, Any]:
                 }
                 update_data["updated_at"] = now
                 existing = spec_items_service.get_spec_item_by_id(db, int(target_id)) or {}
-                spec_items_service.upsert_spec_item(db, int(target_id), update_data, is_update=True)
+                merged_payload = {**existing, **update_data}
+                spec_items_service.upsert_spec_item(
+                    db, int(target_id), merged_payload, is_update=True
+                )
                 for col, new_val in update_data.items():
                     old_str = serialize_for_compare(existing.get(col))
                     new_str = serialize_for_compare(new_val)

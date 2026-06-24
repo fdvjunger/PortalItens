@@ -77,16 +77,120 @@ export interface SpecItemsQuery {
   mds?: string;
   spec_id?: string | number;
   has_nace?: string;
+  rating?: string;
+  has_weight?: string;
+  has_alterdata?: string;
+  has_paint_area?: string;
+  has_material?: string;
+  include_external_items?: string;
+}
+
+export interface FamilyQualityRow {
+  item_type: string;
+  total: number;
+  without_weight: number;
+  without_alterdata: number;
+  without_paint_area: number;
+  without_material: number;
+  pct_without_weight: number;
+  pct_without_alterdata: number;
+  pct_without_paint_area: number;
+  pct_without_material: number;
+}
+
+export interface ClientSummaryRow {
+  cliente: string;
+  total_occurrences: number;
+  total_specs: number;
+  total_items_estimate: number;
+  without_weight: number;
+  without_alterdata: number;
+  without_paint_area: number;
+  without_material: number;
+  pct_without_weight: number;
+  pct_without_alterdata: number;
+  pct_without_paint_area: number;
+  pct_without_material: number;
+}
+
+export interface SpecSummaryRow {
+  spec_id: number;
+  cliente: string | null;
+  revision: string | null;
+  total_occurrences: number;
+  total_items_estimate: number;
+  pct_without_weight: number;
+  pct_without_alterdata: number;
+  pct_without_paint_area: number;
+  pct_without_material: number;
+}
+
+export interface ClientDetail {
+  cliente: string;
+  summary: ClientSummaryRow;
+  total_occurrences: number;
+  total_specs: number;
+  unique_catalog_items: number | null;
+  distribution: DashboardStats['distribution'];
+  quality_by_family: FamilyQualityRow[];
+  specs: Array<SpecSummaryRow & { without_weight?: number; without_alterdata?: number }>;
+  productive_scope?: DashboardStats['productive_scope'];
+}
+
+export interface SpecDetail {
+  spec_id: number;
+  cliente: string | null;
+  revision: string | null;
+  total_occurrences: number;
+  unique_catalog_items: number | null;
+  distribution: DashboardStats['distribution'];
+  quality_by_family: FamilyQualityRow[];
+  summary: {
+    total_occurrences: number;
+    pct_without_weight: number;
+    pct_without_alterdata: number;
+    pct_without_paint_area: number;
+    pct_without_material: number;
+  };
+  productive_scope?: DashboardStats['productive_scope'];
 }
 
 export interface DashboardStats {
   total_items: number;
+  total_occurrences: number;
+  unique_clients: number;
+  unique_specs: number;
+  unique_catalog_items: number | null;
+  deduplication_percent: number;
   by_client: Array<{ cliente: string; total: number }>;
+  clients_summary: ClientSummaryRow[];
+  quality_by_family: FamilyQualityRow[];
+  top_schedules: Array<{ label: string; total: number }>;
+  top_materials: Array<{ label: string; total: number }>;
+  distribution: {
+    with_weight: number;
+    without_weight: number;
+    with_alterdata_id: number;
+    without_alterdata_id: number;
+    with_paint_area: number;
+    without_paint_area: number;
+    with_material: number;
+    without_material: number;
+  };
   total_pipe: number;
   total_flange: number;
   with_alterdata_id: number;
   without_alterdata_id: number;
+  productive_scope?: {
+    include_external_items: boolean;
+    note: string;
+    excluded_markers: string[];
+  };
 }
+
+export type DashboardStatsQuery = Omit<SpecItemsQuery, 'page' | 'page_size' | 'sort_by' | 'sort_dir'> & {
+  include_external_items?: string;
+};
 
 export interface SuggestedMapping {
   excel_column: string;
@@ -331,8 +435,36 @@ export async function getColumns(): Promise<ColumnMetadata[]> {
   return data;
 }
 
-export async function getDashboardStats(): Promise<DashboardStats> {
-  const { data } = await http.get('/spec-items/stats');
+export async function getDashboardStats(params: DashboardStatsQuery = {}): Promise<DashboardStats> {
+  const { data } = await http.get('/spec-items/stats', { params });
+  return data;
+}
+
+export async function getClientsPage(params: DashboardStatsQuery = {}): Promise<{
+  items: ClientSummaryRow[];
+  total: number;
+  productive_scope?: DashboardStats['productive_scope'];
+}> {
+  const { data } = await http.get('/spec-items/clients', { params });
+  return data;
+}
+
+export async function getClientDetail(cliente: string, params: DashboardStatsQuery = {}): Promise<ClientDetail> {
+  const { data } = await http.get(`/spec-items/clients/${encodeURIComponent(cliente)}`, { params });
+  return data;
+}
+
+export async function getSpecsPage(params: DashboardStatsQuery = {}): Promise<{
+  items: SpecSummaryRow[];
+  total: number;
+  productive_scope?: DashboardStats['productive_scope'];
+}> {
+  const { data } = await http.get('/spec-items/specs', { params });
+  return data;
+}
+
+export async function getSpecDetail(specId: number, params: DashboardStatsQuery = {}): Promise<SpecDetail> {
+  const { data } = await http.get(`/spec-items/specs/${specId}`, { params });
   return data;
 }
 

@@ -28,8 +28,42 @@ def get_columns(db: Session = Depends(get_db)):
 
 
 @router.get("/stats")
-def get_stats(db: Session = Depends(get_db)):
-    return spec_items_service.get_dashboard_stats(db)
+def get_stats(
+    db: Session = Depends(get_db),
+    global_search: str | None = None,
+    cliente: str | None = None,
+    item_type: str | None = None,
+    short_code: str | None = None,
+    schedule: str | None = None,
+    material_description: str | None = None,
+    mds: str | None = None,
+    spec_id: int | None = None,
+    has_nace: str | None = None,
+    rating: str | None = None,
+    has_weight: str | None = None,
+    has_alterdata: str | None = None,
+    has_paint_area: str | None = None,
+    has_material: str | None = None,
+    include_external_items: str | None = None,
+):
+    return spec_items_service.get_dashboard_stats(
+        db,
+        global_search=global_search,
+        cliente=cliente,
+        item_type=item_type,
+        short_code=short_code,
+        schedule=schedule,
+        material_description=material_description,
+        mds=mds,
+        spec_id=spec_id,
+        has_nace=has_nace,
+        rating=rating,
+        has_weight=has_weight,
+        has_alterdata=has_alterdata,
+        has_paint_area=has_paint_area,
+        has_material=has_material,
+        include_external_items=include_external_items,
+    )
 
 
 @router.get("")
@@ -48,6 +82,12 @@ def list_spec_items(
     mds: str | None = None,
     spec_id: int | None = None,
     has_nace: str | None = None,
+    rating: str | None = None,
+    has_weight: str | None = None,
+    has_alterdata: str | None = None,
+    has_paint_area: str | None = None,
+    has_material: str | None = None,
+    include_external_items: str | None = None,
 ):
     try:
         log_event(
@@ -84,6 +124,12 @@ def list_spec_items(
             mds=mds,
             spec_id=spec_id,
             has_nace=has_nace,
+            rating=rating,
+            has_weight=has_weight,
+            has_alterdata=has_alterdata,
+            has_paint_area=has_paint_area,
+            has_material=has_material,
+            include_external_items=include_external_items,
         )
         log_event(
             "SPEC_ITEMS",
@@ -159,6 +205,162 @@ def export_template(db: Session = Depends(get_db)):
         iter([content]),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="spec_items_template.xlsx"'},
+    )
+
+
+@router.get("/clients")
+def list_clients(
+    db: Session = Depends(get_db),
+    global_search: str | None = None,
+    cliente: str | None = None,
+    item_type: str | None = None,
+    short_code: str | None = None,
+    schedule: str | None = None,
+    material_description: str | None = None,
+    mds: str | None = None,
+    spec_id: int | None = None,
+    has_nace: str | None = None,
+    rating: str | None = None,
+    has_weight: str | None = None,
+    has_alterdata: str | None = None,
+    has_paint_area: str | None = None,
+    has_material: str | None = None,
+    include_external_items: str | None = None,
+):
+    return spec_items_service.list_clients_page(
+        db,
+        global_search=global_search,
+        cliente=cliente,
+        item_type=item_type,
+        short_code=short_code,
+        schedule=schedule,
+        material_description=material_description,
+        mds=mds,
+        spec_id=spec_id,
+        has_nace=has_nace,
+        rating=rating,
+        has_weight=has_weight,
+        has_alterdata=has_alterdata,
+        has_paint_area=has_paint_area,
+        has_material=has_material,
+        include_external_items=include_external_items,
+    )
+
+
+@router.get("/clients/{cliente:path}")
+def get_client(
+    cliente: str,
+    db: Session = Depends(get_db),
+    global_search: str | None = None,
+    item_type: str | None = None,
+    short_code: str | None = None,
+    schedule: str | None = None,
+    material_description: str | None = None,
+    mds: str | None = None,
+    spec_id: int | None = None,
+    has_nace: str | None = None,
+    rating: str | None = None,
+    has_weight: str | None = None,
+    has_alterdata: str | None = None,
+    has_paint_area: str | None = None,
+    has_material: str | None = None,
+    include_external_items: str | None = None,
+):
+    return spec_items_service.get_client_detail(
+        db,
+        cliente,
+        global_search=global_search,
+        item_type=item_type,
+        short_code=short_code,
+        schedule=schedule,
+        material_description=material_description,
+        mds=mds,
+        spec_id=spec_id,
+        has_nace=has_nace,
+        rating=rating,
+        has_weight=has_weight,
+        has_alterdata=has_alterdata,
+        has_paint_area=has_paint_area,
+        has_material=has_material,
+        include_external_items=include_external_items,
+    )
+
+
+@router.get("/specs")
+def list_specs(
+    db: Session = Depends(get_db),
+    global_search: str | None = None,
+    cliente: str | None = None,
+    item_type: str | None = None,
+    short_code: str | None = None,
+    schedule: str | None = None,
+    material_description: str | None = None,
+    mds: str | None = None,
+    spec_id: int | None = None,
+    has_nace: str | None = None,
+    rating: str | None = None,
+    has_weight: str | None = None,
+    has_alterdata: str | None = None,
+    has_paint_area: str | None = None,
+    has_material: str | None = None,
+    include_external_items: str | None = None,
+):
+    return spec_items_service.list_specs_summary(
+        db,
+        global_search=global_search,
+        cliente=cliente,
+        item_type=item_type,
+        short_code=short_code,
+        schedule=schedule,
+        material_description=material_description,
+        mds=mds,
+        spec_id=spec_id,
+        has_nace=has_nace,
+        rating=rating,
+        has_weight=has_weight,
+        has_alterdata=has_alterdata,
+        has_paint_area=has_paint_area,
+        has_material=has_material,
+        include_external_items=include_external_items,
+    )
+
+
+@router.get("/specs/{spec_id}")
+def get_spec(
+    spec_id: int,
+    db: Session = Depends(get_db),
+    global_search: str | None = None,
+    cliente: str | None = None,
+    item_type: str | None = None,
+    short_code: str | None = None,
+    schedule: str | None = None,
+    material_description: str | None = None,
+    mds: str | None = None,
+    has_nace: str | None = None,
+    rating: str | None = None,
+    has_weight: str | None = None,
+    has_alterdata: str | None = None,
+    has_paint_area: str | None = None,
+    has_material: str | None = None,
+    include_external_items: str | None = None,
+):
+    return spec_items_service.get_spec_detail(
+        db,
+        spec_id,
+        global_search=global_search,
+        cliente=cliente,
+        item_type=item_type,
+        short_code=short_code,
+        schedule=schedule,
+        material_description=material_description,
+        mds=mds,
+        has_nace=has_nace,
+        rating=rating,
+        has_weight=has_weight,
+        has_alterdata=has_alterdata,
+        has_paint_area=has_paint_area,
+        has_material=has_material,
+        include_external_items=include_external_items,
     )
 
 
