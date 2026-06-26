@@ -18,12 +18,14 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import PeopleIcon from '@mui/icons-material/People';
 import DescriptionIcon from '@mui/icons-material/Description';
 import CategoryIcon from '@mui/icons-material/Category';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
 import { stepTokens } from '../theme/tokens';
 
 const drawerWidth = 260;
 
 const menuItems = [
   { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
+  { label: 'Qualidade cadastral', path: '/qualidade-familia', icon: <FactCheckIcon /> },
   { label: 'Clientes', path: '/clientes', icon: <PeopleIcon /> },
   { label: 'Specs', path: '/specs', icon: <DescriptionIcon /> },
   { label: 'Catálogo', path: '/catalog-items', icon: <CategoryIcon /> },

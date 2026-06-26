@@ -4,6 +4,7 @@ import CatalogPage from './pages/CatalogPage';
 import ClientDetailPage from './pages/ClientDetailPage';
 import ClientsPage from './pages/ClientsPage';
 import DashboardPage from './pages/DashboardPage';
+import FamilyQualityPage from './pages/FamilyQualityPage';
 import ImportExcelPage from './pages/ImportExcelPage';
 import SpecDetailPage from './pages/SpecDetailPage';
 import SpecItemDetailPage from './pages/SpecItemDetailPage';
@@ -16,6 +17,7 @@ export default function App() {
       <Route path="/" element={<AppLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="qualidade-familia" element={<FamilyQualityPage />} />
         <Route path="clientes" element={<ClientsPage />} />
         <Route path="clientes/:cliente" element={<ClientDetailPage />} />
         <Route path="specs" element={<SpecsPage />} />

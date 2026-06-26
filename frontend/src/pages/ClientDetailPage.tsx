@@ -31,6 +31,7 @@ import {
   getSpecItems,
 } from '../api/specItemsApi';
 import { decodeRouteParam, specPath } from '../utils/navigation';
+import { buildDataQualitySummary } from '../utils/dataQualitySummary';
 
 const ITEM_COLUMNS = ['id', 'spec_id', 'item_type', 'short_code', 'schedule', 'material_description', 'weight', 'alterDataID'];
 
@@ -213,7 +214,11 @@ export default function ClientDetailPage() {
           {detail.quality_by_family.length > 0 && (
             <Box sx={{ mb: 3 }}>
               <SectionHeader title="Qualidade por família" />
-              <DataQualityTable rows={detail.quality_by_family} maxHeight={420} />
+              <DataQualityTable
+                rows={detail.quality_by_family}
+                summary={buildDataQualitySummary(detail.total_occurrences, detail.distribution)}
+                maxHeight={420}
+              />
             </Box>
           )}
         </>

@@ -14,7 +14,6 @@ import {
 import BusinessIcon from '@mui/icons-material/Business';
 import CategoryIcon from '@mui/icons-material/Category';
 import LayersIcon from '@mui/icons-material/Layers';
-import MergeTypeIcon from '@mui/icons-material/MergeType';
 import PeopleIcon from '@mui/icons-material/People';
 import CloseIcon from '@mui/icons-material/Close';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
@@ -22,7 +21,6 @@ import ActiveFilterChips from '../components/dashboard/ActiveFilterChips';
 import ClientsTable from '../components/dashboard/ClientsTable';
 import DashboardCharts from '../components/dashboard/DashboardCharts';
 import DashboardFilterAccordion, { emptySpecItemsFilters } from '../components/dashboard/DashboardFilterAccordion';
-import DataQualityTable from '../components/dashboard/DataQualityTable';
 import KpiCard from '../components/dashboard/KpiCard';
 import SectionHeader from '../components/dashboard/SectionHeader';
 import EmptyState from '../components/common/EmptyState';
@@ -182,8 +180,8 @@ export default function DashboardPage() {
 
       {loading || !stats ? (
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          {Array.from({ length: 5 }).map((_, index) => (
-            <Grid item xs={12} sm={6} md={4} lg={2.4} key={`kpi-skel-${index}`}>
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Grid item xs={12} sm={6} md={3} key={`kpi-skel-${index}`}>
               <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'background.paper', border: 1, borderColor: 'divider' }}>
                 <TableSkeleton columns={1} rows={2} />
               </Box>
@@ -200,8 +198,7 @@ export default function DashboardPage() {
               gridTemplateColumns: {
                 xs: '1fr',
                 sm: 'repeat(2, 1fr)',
-                md: 'repeat(3, 1fr)',
-                lg: 'repeat(5, 1fr)',
+                lg: 'repeat(4, 1fr)',
               },
             }}
           >
@@ -233,13 +230,6 @@ export default function DashboardPage() {
               icon={<CategoryIcon />}
               subtitle="Catálogo deduplicado"
               accent="secondary"
-              to="/catalog-items"
-            />
-            <KpiCard
-              title="Deduplicação"
-              value={`${stats.deduplication_percent.toFixed(1)}%`}
-              icon={<MergeTypeIcon />}
-              subtitle="Redução ocorrência → único"
               to="/catalog-items"
             />
           </Box>
@@ -275,19 +265,6 @@ export default function DashboardPage() {
       {stats && (
         <>
           <Box sx={{ mb: 3, mt: 3 }}>
-            <SectionHeader
-              title="Qualidade cadastral por família"
-              subtitle="Percentuais de lacunas por item_type — priorize famílias em vermelho/laranja."
-              badge={<Chip size="small" label="Ocorrências" color="primary" variant="outlined" />}
-            />
-            {stats.quality_by_family.length ? (
-              <DataQualityTable rows={stats.quality_by_family} maxHeight={480} />
-            ) : (
-              <EmptyState title="Sem dados para qualidade por família" description="Ajuste os filtros ou aguarde a carga dos dados." />
-            )}
-          </Box>
-
-          <Box sx={{ mb: 3 }}>
             <SectionHeader
               title="Visão por cliente"
               subtitle="Ranking operacional por volume e qualidade."

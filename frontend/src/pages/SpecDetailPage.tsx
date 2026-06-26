@@ -29,6 +29,7 @@ import {
 } from '../api/specItemsApi';
 import { SpecItemsFilterValues, filtersToQuery } from '../types/filters';
 import { clientePath } from '../utils/navigation';
+import { buildDataQualitySummary } from '../utils/dataQualitySummary';
 
 const ITEM_COLUMNS = [
   'id',
@@ -251,7 +252,11 @@ export default function SpecDetailPage() {
           {detail.quality_by_family.length > 0 && (
             <Box sx={{ mb: 3 }}>
               <SectionHeader title="Qualidade por família nesta spec" />
-              <DataQualityTable rows={detail.quality_by_family} maxHeight={420} />
+              <DataQualityTable
+                rows={detail.quality_by_family}
+                summary={buildDataQualitySummary(detail.total_occurrences, detail.distribution)}
+                maxHeight={420}
+              />
             </Box>
           )}
         </>
