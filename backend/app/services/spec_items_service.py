@@ -129,7 +129,7 @@ def _quality_filter_sql(field: str, value: str) -> str | None:
         return f"NOT {blank}" if positive else blank
     if field == "has_paint_area":
         area = quote_identifier("area_m2_per_m")
-        return f"({area} IS NOT NULL AND {area} <> 0)" if positive else f"({area} IS NULL OR {area} = 0)"
+        return f"({area} IS NOT NULL)" if positive else f"({area} IS NULL)"
     if field == "has_material":
         blank = _is_blank_sql("material_description")
         return f"NOT {blank}" if positive else blank
@@ -287,9 +287,20 @@ def fetch_items_for_export(
 
 
 def get_dashboard_stats(db: Session, **filters: Any) -> dict[str, Any]:
+    """Estatísticas gerais e Qualidade Cadastral.
+
+    Importante:
+    - A fonte de leitura operacional continua sendo spec_items.
+    - A Qualidade Cadastral deve medir cobertura do catálogo normalizado,
+      usando catalog_items únicos.
+    - area_m2_per_m = 0 é valor válido para item não aplicável/não pintável;
+      só NULL conta como pendente.
+    """
     source = _read_from()
     like_op = like_operator()
     valid_columns = get_valid_column_names(db)
+    cfg = get_db_schema_config()
+
     filter_params = dict(filters)
     include_external_items = parse_include_external_items(
         filter_params.pop("include_external_items", None),
@@ -298,7 +309,11 @@ def get_dashboard_stats(db: Session, **filters: Any) -> dict[str, Any]:
     where_clause, bind = _build_filters(filter_params, valid_columns)
     where_clause = append_productive_exclusion(where_clause, include_external_items)
 
-    total = db.execute(text(f"SELECT COUNT(*) FROM {source} {where_clause}"), bind).scalar() or 0
+    # Ocorrências em specs: fica disponível para auditoria/deduplicação.
+    total_occurrences = db.execute(
+        text(f"SELECT COUNT(*) FROM {source} {where_clause}"),
+        bind,
+    ).scalar() or 0
 
     unique_clients = db.execute(
         text(
@@ -322,24 +337,179 @@ def get_dashboard_stats(db: Session, **filters: Any) -> dict[str, Any]:
         bind,
     ).scalar() or 0
 
-    unique_catalog_items = _count_unique_catalog_items(db, source, where_clause, bind)
+    schema = cfg.get("schema") or "public"
+    catalog_table = cfg.get("catalog_items_table") or f"{schema}.catalog_items"
+    alterdata_table = cfg.get("catalog_item_alterdata_ids_table") or f"{schema}.catalog_item_alterdata_ids"
+    spec_catalog_table = cfg.get("spec_catalog_items_table") or f"{schema}.spec_catalog_items"
+
+    item_types_table = f"{schema}.catalog_item_types"
+    schedules_table = f"{schema}.catalog_schedules"
+    materials_table = f"{schema}.catalog_materials"
+    ratings_table = f"{schema}.catalog_ratings"
+
+    def _catalog_blank_sql(expr: str) -> str:
+        return f"({expr} IS NULL OR LTRIM(RTRIM(CAST({expr} AS VARCHAR(1000)))) = '')"
+
+    def _catalog_exists_spec(extra_condition: str) -> str:
+        return f"""
+            EXISTS (
+                SELECT 1
+                FROM {spec_catalog_table} sci_filter
+                JOIN {source} si_filter
+                  ON si_filter.id = sci_filter.legacy_spec_item_id
+                WHERE sci_filter.catalog_item_id = ci.id
+                  AND {extra_condition}
+            )
+        """
+
+    catalog_conditions: list[str] = []
+    catalog_bind: dict[str, Any] = {}
+
+    # Filtros da tela aplicados ao catálogo quando possível.
+    global_search = filter_params.get("global_search")
+    if global_search:
+        catalog_conditions.append(
+            "(" + " OR ".join(
+                [
+                    f"it.item_type {like_op} :catalog_global_search",
+                    f"it.short_code {like_op} :catalog_global_search",
+                    f"sch.schedule {like_op} :catalog_global_search",
+                    f"mat.material_description {like_op} :catalog_global_search",
+                    f"CAST(r.rating AS VARCHAR(1000)) {like_op} :catalog_global_search",
+                    f"CAST(ci.canonical_item_key AS VARCHAR(1000)) {like_op} :catalog_global_search",
+                    _catalog_exists_spec(
+                        " OR ".join(
+                            [
+                                f"CAST(si_filter.cliente AS VARCHAR(1000)) {like_op} :catalog_global_search",
+                                f"CAST(si_filter.item_key AS VARCHAR(1000)) {like_op} :catalog_global_search",
+                                f"CAST(si_filter.spec_id AS VARCHAR(1000)) {like_op} :catalog_global_search",
+                            ]
+                        )
+                    ),
+                ]
+            ) + ")"
+        )
+        catalog_bind["catalog_global_search"] = f"%{global_search}%"
+
+    if filter_params.get("cliente"):
+        catalog_conditions.append(
+            _catalog_exists_spec(f"CAST(si_filter.cliente AS VARCHAR(1000)) {like_op} :catalog_cliente")
+        )
+        catalog_bind["catalog_cliente"] = f"%{filter_params['cliente']}%"
+
+    if filter_params.get("spec_id") not in {None, ""}:
+        catalog_conditions.append(_catalog_exists_spec("si_filter.spec_id = :catalog_spec_id"))
+        catalog_bind["catalog_spec_id"] = int(filter_params["spec_id"])
+
+    if filter_params.get("item_type"):
+        catalog_conditions.append(f"it.item_type {like_op} :catalog_item_type")
+        catalog_bind["catalog_item_type"] = f"%{filter_params['item_type']}%"
+
+    if filter_params.get("short_code"):
+        catalog_conditions.append(f"it.short_code {like_op} :catalog_short_code")
+        catalog_bind["catalog_short_code"] = f"%{filter_params['short_code']}%"
+
+    if filter_params.get("schedule"):
+        catalog_conditions.append(f"sch.schedule {like_op} :catalog_schedule")
+        catalog_bind["catalog_schedule"] = f"%{filter_params['schedule']}%"
+
+    if filter_params.get("material_description"):
+        catalog_conditions.append(f"mat.material_description {like_op} :catalog_material_description")
+        catalog_bind["catalog_material_description"] = f"%{filter_params['material_description']}%"
+
+    if filter_params.get("rating"):
+        catalog_conditions.append(f"CAST(r.rating AS VARCHAR(1000)) {like_op} :catalog_rating")
+        catalog_bind["catalog_rating"] = f"%{filter_params['rating']}%"
+
+    has_nace = filter_params.get("has_nace")
+    if has_nace is not None and has_nace != "":
+        normalized_has_nace = str(has_nace).lower()
+        if normalized_has_nace in {"true", "1", "yes"}:
+            catalog_conditions.append(f"mat.has_nace IS {bool_true_sql()}")
+        elif normalized_has_nace in {"false", "0", "no"}:
+            catalog_conditions.append(f"mat.has_nace IS {bool_false_sql()}")
+
+    def _quality_flag(field: str) -> bool | None:
+        value = filter_params.get(field)
+        if value is None or value == "":
+            return None
+        normalized = str(value).lower()
+        if normalized not in {"true", "false", "1", "0", "yes", "no"}:
+            return None
+        return normalized in {"true", "1", "yes"}
+
+    has_weight = _quality_flag("has_weight")
+    if has_weight is not None:
+        catalog_conditions.append("(ci.weight IS NOT NULL AND ci.weight <> 0)" if has_weight else "(ci.weight IS NULL OR ci.weight = 0)")
+
+    has_paint_area = _quality_flag("has_paint_area")
+    if has_paint_area is not None:
+        catalog_conditions.append("ci.area_m2_per_m IS NOT NULL" if has_paint_area else "ci.area_m2_per_m IS NULL")
+
+    has_material = _quality_flag("has_material")
+    if has_material is not None:
+        catalog_conditions.append("ci.material_id IS NOT NULL" if has_material else "ci.material_id IS NULL")
+
+    has_alterdata = _quality_flag("has_alterdata")
+    alterdata_exists = f"EXISTS (SELECT 1 FROM {alterdata_table} cai_filter WHERE cai_filter.catalog_item_id = ci.id)"
+    if has_alterdata is not None:
+        catalog_conditions.append(alterdata_exists if has_alterdata else f"NOT {alterdata_exists}")
+
+    catalog_where_clause = ""
+    if catalog_conditions:
+        catalog_where_clause = "WHERE " + " AND ".join(catalog_conditions)
+
+    catalog_from = f"""
+        FROM {catalog_table} ci
+        LEFT JOIN {item_types_table} it ON it.id = ci.item_type_id
+        LEFT JOIN {schedules_table} sch ON sch.id = ci.schedule_id
+        LEFT JOIN {materials_table} mat ON mat.id = ci.material_id
+        LEFT JOIN {ratings_table} r ON r.id = ci.rating_id
+        {catalog_where_clause}
+    """
+
+    catalog_quality = db.execute(
+        text(
+            f"""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN ci.weight IS NOT NULL AND ci.weight <> 0 THEN 1 ELSE 0 END) AS with_weight,
+                SUM(CASE WHEN {alterdata_exists} THEN 1 ELSE 0 END) AS with_alterdata,
+                SUM(CASE WHEN ci.area_m2_per_m IS NOT NULL THEN 1 ELSE 0 END) AS with_paint_area,
+                SUM(CASE WHEN ci.material_id IS NOT NULL THEN 1 ELSE 0 END) AS with_material
+            {catalog_from}
+            """
+        ),
+        catalog_bind,
+    ).mappings().one()
+
+    total = int(catalog_quality["total"] or 0)
+    unique_catalog_items = total
+    with_weight = int(catalog_quality["with_weight"] or 0)
+    with_alterdata = int(catalog_quality["with_alterdata"] or 0)
+    with_paint_area = int(catalog_quality["with_paint_area"] or 0)
+    with_material = int(catalog_quality["with_material"] or 0)
+    without_alterdata = total - with_alterdata
 
     deduplication_percent = 0.0
-    if total > 0 and unique_catalog_items is not None:
-        deduplication_percent = round((1 - (unique_catalog_items / total)) * 100, 2)
+    if total_occurrences > 0 and unique_catalog_items is not None:
+        deduplication_percent = round((1 - (unique_catalog_items / total_occurrences)) * 100, 2)
 
+    # Por cliente ainda depende das ocorrências em spec, mas deduplicando por item_key.
+    # A qualidade geral/família/cards é feita pelo catálogo normalizado.
+    item_key_identity_sql = "NULLIF(LTRIM(RTRIM(CAST(item_key AS VARCHAR(1000)))), '')"
     by_client_rows = db.execute(
         text(
             f"""
             SELECT
                 COALESCE(cliente, '(sem cliente)') AS cliente,
-                COUNT(*) AS total_occurrences,
+                COUNT(DISTINCT {item_key_identity_sql}) AS total_occurrences,
                 COUNT(DISTINCT spec_id) AS total_specs,
-                COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CAST(item_key AS VARCHAR(1000)))), '')) AS total_items_estimate,
-                SUM(CASE WHEN weight IS NULL OR weight = 0 THEN 1 ELSE 0 END) AS without_weight,
-                SUM(CASE WHEN {_is_blank_sql('alterDataID')} THEN 1 ELSE 0 END) AS without_alterdata,
-                SUM(CASE WHEN area_m2_per_m IS NULL THEN 1 ELSE 0 END) AS without_paint_area,
-                SUM(CASE WHEN {_is_blank_sql('material_description')} THEN 1 ELSE 0 END) AS without_material
+                COUNT(DISTINCT {item_key_identity_sql}) AS total_items_estimate,
+                COUNT(DISTINCT CASE WHEN weight IS NULL OR weight = 0 THEN {item_key_identity_sql} END) AS without_weight,
+                COUNT(DISTINCT CASE WHEN {_is_blank_sql('alterDataID')} THEN {item_key_identity_sql} END) AS without_alterdata,
+                COUNT(DISTINCT CASE WHEN area_m2_per_m IS NULL THEN {item_key_identity_sql} END) AS without_paint_area,
+                COUNT(DISTINCT CASE WHEN {_is_blank_sql('material_description')} THEN {item_key_identity_sql} END) AS without_material
             FROM {source}
             {where_clause}
             GROUP BY cliente
@@ -353,122 +523,67 @@ def get_dashboard_stats(db: Session, **filters: Any) -> dict[str, Any]:
         text(
             f"""
             SELECT
-                COALESCE(item_type, '(sem famÃ­lia)') AS item_type,
+                COALESCE(it.item_type, '(sem família)') AS item_type,
                 COUNT(*) AS total,
-                SUM(CASE WHEN weight IS NULL OR weight = 0 THEN 1 ELSE 0 END) AS without_weight,
-                SUM(CASE WHEN {_is_blank_sql('alterDataID')} THEN 1 ELSE 0 END) AS without_alterdata,
-                SUM(CASE WHEN area_m2_per_m IS NULL THEN 1 ELSE 0 END) AS without_paint_area,
-                SUM(CASE WHEN {_is_blank_sql('material_description')} THEN 1 ELSE 0 END) AS without_material
-            FROM {source}
-            {where_clause}
-            GROUP BY item_type
+                SUM(CASE WHEN ci.weight IS NULL OR ci.weight = 0 THEN 1 ELSE 0 END) AS without_weight,
+                SUM(CASE WHEN NOT {alterdata_exists} THEN 1 ELSE 0 END) AS without_alterdata,
+                SUM(CASE WHEN ci.area_m2_per_m IS NULL THEN 1 ELSE 0 END) AS without_paint_area,
+                SUM(CASE WHEN ci.material_id IS NULL THEN 1 ELSE 0 END) AS without_material
+            {catalog_from}
+            GROUP BY it.item_type
             ORDER BY total DESC, item_type
             """
         ),
-        bind,
+        catalog_bind,
     ).mappings().all()
 
     top_schedules = db.execute(
         text(
             f"""
-            SELECT COALESCE(schedule, '(sem schedule)') AS label, COUNT(*) AS total
-            FROM {source}
-            {where_clause}
-            GROUP BY schedule
-            ORDER BY total DESC
-            OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
-            """
-        )
-        if get_db_schema_config()["dialect"] == "mssql"
-        else text(
-            f"""
-            SELECT COALESCE(schedule, '(sem schedule)') AS label, COUNT(*) AS total
-            FROM {source}
-            {where_clause}
-            GROUP BY schedule
+            SELECT COALESCE(sch.schedule, '(sem schedule)') AS label, COUNT(*) AS total
+            {catalog_from}
+            GROUP BY sch.schedule
             ORDER BY total DESC
             LIMIT 10
             """
         ),
-        bind,
+        catalog_bind,
     ).mappings().all()
 
     top_materials = db.execute(
         text(
             f"""
-            SELECT COALESCE(material_description, '(sem material)') AS label, COUNT(*) AS total
-            FROM {source}
-            {where_clause}
-            GROUP BY material_description
-            ORDER BY total DESC
-            OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY
-            """
-        )
-        if get_db_schema_config()["dialect"] == "mssql"
-        else text(
-            f"""
-            SELECT COALESCE(material_description, '(sem material)') AS label, COUNT(*) AS total
-            FROM {source}
-            {where_clause}
-            GROUP BY material_description
+            SELECT COALESCE(mat.material_description, '(sem material)') AS label, COUNT(*) AS total
+            {catalog_from}
+            GROUP BY mat.material_description
             ORDER BY total DESC
             LIMIT 10
             """
         ),
-        bind,
+        catalog_bind,
     ).mappings().all()
 
-    with_weight = db.execute(
-        text(
-            f"""
-            SELECT COUNT(*) FROM {source}
-            {and_condition(where_clause, "weight IS NOT NULL AND weight <> 0")}
-            """
-        ),
-        bind,
-    ).scalar() or 0
-
-    with_alterdata = db.execute(
-        text(
-            f"""
-            SELECT COUNT(*) FROM {source}
-            {and_condition(where_clause, f"NOT {_is_blank_sql('alterDataID')}")}
-            """
-        ),
-        bind,
-    ).scalar() or 0
-
-    with_paint_area = db.execute(
-        text(
-            f"""
-            SELECT COUNT(*) FROM {source}
-            {and_condition(where_clause, "area_m2_per_m IS NOT NULL")}
-            """
-        ),
-        bind,
-    ).scalar() or 0
-
-    with_material = db.execute(
-        text(
-            f"""
-            SELECT COUNT(*) FROM {source}
-            {and_condition(where_clause, f"NOT {_is_blank_sql('material_description')}")}
-            """
-        ),
-        bind,
-    ).scalar() or 0
-
     total_pipe = db.execute(
-        text(f"SELECT COUNT(*) FROM {source} {and_condition(where_clause, f"item_type {like_op} '%PIPE%'")}"),
-        bind,
+        text(
+            f"""
+            SELECT COUNT(*)
+            {catalog_from}
+            {and_condition(catalog_where_clause, f"it.item_type {like_op} '%PIPE%'")}
+            """
+        ),
+        catalog_bind,
     ).scalar() or 0
 
     total_flange = db.execute(
-        text(f"SELECT COUNT(*) FROM {source} {and_condition(where_clause, f"item_type {like_op} '%FLANGE%'")}"),
-        bind,
+        text(
+            f"""
+            SELECT COUNT(*)
+            {catalog_from}
+            {and_condition(catalog_where_clause, f"it.item_type {like_op} '%FLANGE%'")}
+            """
+        ),
+        catalog_bind,
     ).scalar() or 0
-
-    without_alterdata = total - with_alterdata
 
     def _pct(row: dict[str, Any], field: str) -> float:
         row_total = int(row.get("total") or row.get("total_occurrences") or 0)
@@ -495,8 +610,13 @@ def get_dashboard_stats(db: Session, **filters: Any) -> dict[str, Any]:
         family_quality.append(item)
 
     return {
+        # Na tela de Qualidade Cadastral, os campos consumidos pelo front
+        # precisam usar a mesma base do catálogo. Se total_occurrences ficar
+        # com spec_items, o front divide pendências do catálogo por ocorrências
+        # de specs e mostra percentuais errados.
         "total_items": int(total),
         "total_occurrences": int(total),
+        "total_spec_occurrences": int(total_occurrences),
         "unique_clients": int(unique_clients),
         "unique_specs": int(unique_specs),
         "unique_catalog_items": unique_catalog_items,
@@ -527,7 +647,6 @@ def get_dashboard_stats(db: Session, **filters: Any) -> dict[str, Any]:
         },
     }
 
-
 def _pct_from_counts(row: dict[str, Any], numer_field: str, denom_field: str = "total_occurrences") -> float:
     row_total = int(row.get(denom_field) or row.get("total") or row.get("total_occurrences") or 0)
     if row_total <= 0:
@@ -535,12 +654,23 @@ def _pct_from_counts(row: dict[str, Any], numer_field: str, denom_field: str = "
     return round((int(row[numer_field] or 0) / row_total) * 100, 1)
 
 
-def _quality_agg_sql() -> str:
+def _quality_item_identity_sql(valid_columns: set[str]) -> str:
+    item_key_expr = "NULLIF(LTRIM(RTRIM(CAST(item_key AS VARCHAR(1000)))), '')"
+
+    if "catalog_item_id" in valid_columns:
+        return f"COALESCE(CAST(catalog_item_id AS VARCHAR(1000)), {item_key_expr})"
+
+    return item_key_expr
+
+
+def _quality_agg_sql(item_identity_sql: str) -> str:
     return f"""
-        SUM(CASE WHEN weight IS NULL OR weight = 0 THEN 1 ELSE 0 END) AS without_weight,
-        SUM(CASE WHEN {_is_blank_sql('alterDataID')} THEN 1 ELSE 0 END) AS without_alterdata,
-        SUM(CASE WHEN area_m2_per_m IS NULL THEN 1 ELSE 0 END) AS without_paint_area,
-        SUM(CASE WHEN {_is_blank_sql('material_description')} THEN 1 ELSE 0 END) AS without_material
+        COUNT(DISTINCT {item_identity_sql}) AS total_occurrences,
+        COUNT(DISTINCT {item_identity_sql}) AS total_items_estimate,
+        COUNT(DISTINCT CASE WHEN weight IS NULL OR weight = 0 THEN {item_identity_sql} END) AS without_weight,
+        COUNT(DISTINCT CASE WHEN {_is_blank_sql('alterDataID')} THEN {item_identity_sql} END) AS without_alterdata,
+        COUNT(DISTINCT CASE WHEN area_m2_per_m IS NULL THEN {item_identity_sql} END) AS without_paint_area,
+        COUNT(DISTINCT CASE WHEN {_is_blank_sql('material_description')} THEN {item_identity_sql} END) AS without_material
     """
 
 
@@ -574,17 +704,42 @@ def _productive_scope_payload(include_external_items: bool) -> dict[str, Any]:
 
 
 def list_clients_page(db: Session, **filters: Any) -> dict[str, Any]:
-    stats = get_dashboard_stats(db, **filters)
+    source, where_clause, bind, include_external_items = _prepare_dashboard_scope(db, **filters)
+    valid_columns = set(get_valid_column_names(db))
+    item_identity_sql = _quality_item_identity_sql(valid_columns)
+    quality_agg = _quality_agg_sql(item_identity_sql)
+
+    rows = db.execute(
+        text(
+            f"""
+            SELECT
+                COALESCE(cliente, '(sem cliente)') AS cliente,
+                COUNT(DISTINCT spec_id) AS total_specs,
+                {quality_agg}
+            FROM {source}
+            {where_clause}
+            GROUP BY cliente
+            ORDER BY total_occurrences DESC, cliente
+            """
+        ),
+        bind,
+    ).mappings().all()
+
+    items = [_enrich_quality_percentages(dict(row)) for row in rows]
+
     return {
-        "items": stats["clients_summary"],
-        "total": len(stats["clients_summary"]),
-        "productive_scope": stats["productive_scope"],
+        "items": items,
+        "total": len(items),
+        "productive_scope": _productive_scope_payload(include_external_items),
     }
 
 
 def list_specs_summary(db: Session, **filters: Any) -> dict[str, Any]:
     source, where_clause, bind, include_external_items = _prepare_dashboard_scope(db, **filters)
-    quality_agg = _quality_agg_sql()
+    valid_columns = set(get_valid_column_names(db))
+    item_identity_sql = _quality_item_identity_sql(valid_columns)
+    quality_agg = _quality_agg_sql(item_identity_sql)
+
     rows = db.execute(
         text(
             f"""
@@ -592,8 +747,6 @@ def list_specs_summary(db: Session, **filters: Any) -> dict[str, Any]:
                 spec_id,
                 MAX(cliente) AS cliente,
                 MAX(eds_vds) AS revision,
-                COUNT(*) AS total_occurrences,
-                COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CAST(item_key AS VARCHAR(1000)))), '')) AS total_items_estimate,
                 {quality_agg}
             FROM {source}
             {and_condition(where_clause, "spec_id IS NOT NULL")}
@@ -605,6 +758,7 @@ def list_specs_summary(db: Session, **filters: Any) -> dict[str, Any]:
     ).mappings().all()
 
     items = [_enrich_quality_percentages(dict(row)) for row in rows]
+
     return {
         "items": items,
         "total": len(items),
@@ -615,16 +769,18 @@ def list_specs_summary(db: Session, **filters: Any) -> dict[str, Any]:
 def get_client_detail(db: Session, cliente: str, **filters: Any) -> dict[str, Any]:
     merged = {**filters, "cliente": cliente}
     stats = get_dashboard_stats(db, **merged)
-    source, where_clause, bind, _ = _prepare_dashboard_scope(db, **merged)
-    quality_agg = _quality_agg_sql()
+
+    source, where_clause, bind, include_external_items = _prepare_dashboard_scope(db, **merged)
+    valid_columns = set(get_valid_column_names(db))
+    item_identity_sql = _quality_item_identity_sql(valid_columns)
+    quality_agg = _quality_agg_sql(item_identity_sql)
+
     spec_rows = db.execute(
         text(
             f"""
             SELECT
                 spec_id,
                 MAX(eds_vds) AS revision,
-                COUNT(*) AS total_occurrences,
-                COUNT(DISTINCT NULLIF(LTRIM(RTRIM(CAST(item_key AS VARCHAR(1000)))), '')) AS total_items_estimate,
                 {quality_agg}
             FROM {source}
             {and_condition(where_clause, "spec_id IS NOT NULL")}
@@ -636,29 +792,35 @@ def get_client_detail(db: Session, cliente: str, **filters: Any) -> dict[str, An
     ).mappings().all()
 
     specs = [_enrich_quality_percentages(dict(row)) for row in spec_rows]
-    summary_row = next((row for row in stats["clients_summary"] if row["cliente"] == cliente), None)
-    if summary_row is None and stats["clients_summary"]:
-        summary_row = stats["clients_summary"][0]
+
+    summary_total = sum(int(row.get("total_occurrences") or 0) for row in specs)
+    summary_without_weight = sum(int(row.get("without_weight") or 0) for row in specs)
+    summary_without_alterdata = sum(int(row.get("without_alterdata") or 0) for row in specs)
+    summary_without_paint_area = sum(int(row.get("without_paint_area") or 0) for row in specs)
+    summary_without_material = sum(int(row.get("without_material") or 0) for row in specs)
+
+    summary_row = {
+        "cliente": cliente,
+        "total_occurrences": summary_total,
+        "total_specs": len(specs),
+        "total_items_estimate": summary_total,
+        "without_weight": summary_without_weight,
+        "without_alterdata": summary_without_alterdata,
+        "without_paint_area": summary_without_paint_area,
+        "without_material": summary_without_material,
+    }
+    summary_row = _enrich_quality_percentages(summary_row)
 
     return {
         "cliente": cliente,
-        "summary": summary_row or {
-            "cliente": cliente,
-            "total_occurrences": stats["total_occurrences"],
-            "total_specs": stats["unique_specs"],
-            "total_items_estimate": stats["unique_catalog_items"] or 0,
-            "pct_without_weight": 0.0,
-            "pct_without_alterdata": 0.0,
-            "pct_without_paint_area": 0.0,
-            "pct_without_material": 0.0,
-        },
-        "total_occurrences": stats["total_occurrences"],
-        "total_specs": stats["unique_specs"],
-        "unique_catalog_items": stats["unique_catalog_items"],
+        "summary": summary_row,
+        "total_occurrences": summary_total,
+        "total_specs": len(specs),
+        "unique_catalog_items": summary_total,
         "distribution": stats["distribution"],
         "quality_by_family": stats["quality_by_family"],
         "specs": specs,
-        "productive_scope": stats["productive_scope"],
+        "productive_scope": _productive_scope_payload(include_external_items),
     }
 
 
